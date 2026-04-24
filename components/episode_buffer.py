@@ -1,17 +1,10 @@
 import torch as th
 import numpy as np
 from types import SimpleNamespace as SN
-import pdb
+
 
 class EpisodeBatch:
-    def __init__(self,
-                 scheme,
-                 groups,
-                 batch_size,
-                 max_seq_length,
-                 data=None,
-                 preprocess=None,
-                 device="cpu"):
+    def __init__(self, scheme, groups, batch_size, max_seq_length, data=None, preprocess=None, device="cpu"):
         self.scheme = scheme.copy()
         self.groups = groups
         self.batch_size = batch_size
@@ -39,22 +32,20 @@ class EpisodeBatch:
                 for transform in transforms:
                     vshape, dtype = transform.infer_output_info(vshape, dtype)
 
-                self.scheme[new_k] = {
-                    "vshape": vshape,
-                    "dtype": dtype
-                }
+                self.scheme[new_k] = {"vshape": vshape, "dtype": dtype}
                 if "group" in self.scheme[k]:
                     self.scheme[new_k]["group"] = self.scheme[k]["group"]
                 if "episode_const" in self.scheme[k]:
                     self.scheme[new_k]["episode_const"] = self.scheme[k]["episode_const"]
 
         assert "filled" not in scheme, '"filled" is a reserved key for masking.'
-        scheme.update({
-            "filled": {"vshape": (1,), "dtype": th.long},
-        })
+        scheme.update(
+            {
+                "filled": {"vshape": (1,), "dtype": th.long},
+            }
+        )
 
         for field_key, field_info in scheme.items():
-
             assert "vshape" in field_info, "Scheme must define vshape for {}".format(field_key)
             vshape = field_info["vshape"]
             episode_const = field_info.get("episode_const", False)
@@ -115,7 +106,6 @@ class EpisodeBatch:
                 target[new_k][_slices] = v.view_as(target[new_k][_slices])
 
     def _check_safe_view(self, v, dest):
-
         idx = len(v.shape) - 1
         for s in dest.shape[::-1]:
             if v.shape[idx] != s:
@@ -144,8 +134,7 @@ class EpisodeBatch:
 
             # Update the scheme to only have the requested keys
             new_scheme = {key: self.scheme[key] for key in item}
-            new_groups = {self.scheme[key]["group"]: self.groups[self.scheme[key]["group"]]
-                          for key in item if "group" in self.scheme[key]}
+            new_groups = {self.scheme[key]["group"]: self.groups[self.scheme[key]["group"]] for key in item if "group" in self.scheme[key]}
             ret = EpisodeBatch(new_scheme, new_groups, self.batch_size, self.max_seq_length, data=new_data, device=self.device)
             return ret
         else:
@@ -167,7 +156,7 @@ class EpisodeBatch:
             return len(indexing_item)
         elif isinstance(indexing_item, slice):
             _range = indexing_item.indices(max_size)
-            return 1 + (_range[1] - _range[0] - 1)//_range[2]
+            return 1 + (_range[1] - _range[0] - 1) // _range[2]
 
     def _new_data_sn(self):
         new_data = SN()
@@ -178,10 +167,11 @@ class EpisodeBatch:
     def _parse_slices(self, items):
         parsed = []
         # Only batch slice given, add full time slice
-        if (isinstance(items, slice)  # slice a:b
+        if (
+            isinstance(items, slice)  # slice a:b
             or isinstance(items, int)  # int i
             or (isinstance(items, (list, np.ndarray, th.LongTensor, th.cuda.LongTensor)))  # [a,b,c]
-            ):
+        ):
             items = (items, slice(None))
 
         # Need the time indexing to be contiguous
@@ -189,10 +179,10 @@ class EpisodeBatch:
             raise IndexError("Indexing across Time must be contiguous")
 
         for item in items:
-            #TODO: stronger checks to ensure only supported options get through
+            # TODO: stronger checks to ensure only supported options get through
             if isinstance(item, int):
                 # Convert single indices to slices
-                parsed.append(slice(item, item+1))
+                parsed.append(slice(item, item + 1))
             else:
                 # Leave slices and lists as is
                 parsed.append(item)
@@ -202,10 +192,9 @@ class EpisodeBatch:
         return th.sum(self.data.transition_data["filled"], 1).max(0)[0]
 
     def __repr__(self):
-        return "EpisodeBatch. Batch Size:{} Max_seq_len:{} Keys:{} Groups:{}".format(self.batch_size,
-                                                                                     self.max_seq_length,
-                                                                                     self.scheme.keys(),
-                                                                                     self.groups.keys())
+        return "EpisodeBatch. Batch Size:{} Max_seq_len:{} Keys:{} Groups:{}".format(
+            self.batch_size, self.max_seq_length, self.scheme.keys(), self.groups.keys()
+        )
 
 
 class ReplayBuffer(EpisodeBatch):
@@ -217,13 +206,14 @@ class ReplayBuffer(EpisodeBatch):
 
     def insert_episode_batch(self, ep_batch):
         if self.buffer_index + ep_batch.batch_size <= self.buffer_size:
-            self.update(ep_batch.data.transition_data,
-                        slice(self.buffer_index, self.buffer_index + ep_batch.batch_size),
-                        slice(0, ep_batch.max_seq_length),
-                        mark_filled=False)
-            self.update(ep_batch.data.episode_data,
-                        slice(self.buffer_index, self.buffer_index + ep_batch.batch_size))
-            self.buffer_index = (self.buffer_index + ep_batch.batch_size)
+            self.update(
+                ep_batch.data.transition_data,
+                slice(self.buffer_index, self.buffer_index + ep_batch.batch_size),
+                slice(0, ep_batch.max_seq_length),
+                mark_filled=False,
+            )
+            self.update(ep_batch.data.episode_data, slice(self.buffer_index, self.buffer_index + ep_batch.batch_size))
+            self.buffer_index = self.buffer_index + ep_batch.batch_size
             self.episodes_in_buffer = max(self.episodes_in_buffer, self.buffer_index)
             self.buffer_index = self.buffer_index % self.buffer_size
             assert self.buffer_index < self.buffer_size
@@ -245,8 +235,6 @@ class ReplayBuffer(EpisodeBatch):
             return self[ep_ids]
 
     def __repr__(self):
-        return "ReplayBuffer. {}/{} episodes. Keys:{} Groups:{}".format(self.episodes_in_buffer,
-                                                                        self.buffer_size,
-                                                                        self.scheme.keys(),
-                                                                        self.groups.keys())
-
+        return "ReplayBuffer. {}/{} episodes. Keys:{} Groups:{}".format(
+            self.episodes_in_buffer, self.buffer_size, self.scheme.keys(), self.groups.keys()
+        )
